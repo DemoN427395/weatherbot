@@ -14,7 +14,7 @@ import sqlite3
 
 
 load_dotenv()
-###
+
 
 TOKEN = os.getenv('TOKEN')
 TOKEN_YANDEX = os.getenv('TOKEN_YANDEX')
@@ -31,7 +31,7 @@ cursor.execute('''
 CREATE TABLE IF NOT EXISTS Cities (
 "chat_id" INTEGER NOT NULL,
 "city" TEXT,
-"city_time" TEXT,
+"city_time" TEXT NULL,
 PRIMARY KEY("chat_id"))
 ''')
 
@@ -169,28 +169,35 @@ def sheduler(message):
                                                f'Мой город ***** и бот запомнит Ваш стандартный город!')
            
 
-   global bot_time
-   bot_time = None
-   if bot_time is not None:
-    second_cursor = cursor.execute(f"SELECT city FROM Cities")
-    second_city = second_cursor.fetchone()
-    if second_city is not None:
-        schedule.every().day.at(bot_time).do(return_weather, message)
-        bot.send_message(message.from_user.id, f"Вы указали свой город! \nПогода будет Вам рассылаться каждый день в {bot_time} утра!")
-        while True:
-            if not should_repeat:
-                break
-            schedule.run_pending()
-            time.sleep(1)
-    else:
-        bot.send_message(message.from_user.id, "Вы не указали свой город!")
+   second_cursor = cursor.execute(f"SELECT city FROM Cities")
+   second_city = second_cursor.fetchone()
+   time_cursor = cursor.execute(f"SELECT city_time FROM Cities")
+   time_city = time_cursor.fetchone()
+
+   second_city = second_city[0]
+   time_city = time_city[0]
+
+   if time_city is not None and second_city is not None:
+           
+           schedule.every().day.at(str(time_city)).do(return_weather, message)
+           bot.send_message(message.from_user.id, f"Вы указали свой город и время! \nПогода будет Вам рассылаться каждый день в {str(time_city)}!")
+           
+           while True:
+               if not should_repeat:
+                   break
+               schedule.run_pending()
+               time.sleep(1)
+
+   elif time_city is None and second_city is None:
+       bot.send_message(message.from_user.id, "Вы не указали ваш город и время!")
+       return repeat_time(message)
+
+   elif time_city is not None and second_city is None:
+          bot.send_message(message.from_user.id, "Вы не указали ваш город!")
+
    else:
        bot.send_message(message.from_user.id, "Вы не указали время!")
        return repeat_time(message)
-
-# сделать кнопку выйти
-
-
 
 
 def notrepeat(message):
@@ -214,22 +221,22 @@ def repeat_time(message):
     bot.send_message(message.from_user.id, "Выберите час:", reply_markup=markup_time)
 
 
-
 @bot.callback_query_handler(func=lambda call:True)
 def repeat_time_callback(call):
-    global bot_time
     for _ in range(5):
         try:
             if call.data:
                 
                 bot_time = call.data
-
                 bot.send_message(call.message.chat.id, f'Вы выбрали время: {bot_time}')
+                
+                cursor.execute(f"UPDATE Cities SET city_time = '{bot_time}' WHERE chat_id = {call.message.chat.id}")
+                connection.commit()
+                
                 return bot_time
             break 
         except req.exceptions.ConnectionError:
             time.sleep(1)  
-
 
 
 @bot.message_handler(content_types=['text'])
@@ -237,9 +244,9 @@ def get_text_messages(message):
     global cities
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
 
-
     for _ in range(5):
         try:
+            
             if message.text == "👋 Поздороваться":
                 bot.send_message(message.from_user.id,
                          f'Привет {message.from_user.first_name}!'
@@ -257,30 +264,29 @@ def get_text_messages(message):
                                                             f' Погода в твоём городе: {city}')
                     big_weather(message, city)
 
-
                 else:
                     bot.send_message(message.from_user.id, f'{message.from_user.first_name}!'
                                                        f' Я не знаю Ваш город!\nНапишите: '
                                                        f'Мой город ***** и бот запомнит Ваш стандартный город!')
+
             elif message.text == "🤖 О боте":
                 bot.send_message(message.from_user.id, 
                          'Простой бот для прогноза погоды на текущий день!'
                          '\nРазработан студентом группы ИС31-21 Рудовым Я.В.', reply_markup=markup)
         
             elif message.text == "⚙️ Настройки":
-
+                
                 markup.add(*settingskeyboard)
                 bot.send_message(message.chat.id, text="Настройки:", reply_markup=markup)
 
             elif message.text == "📣 Рассылка":
-                return sheduler(message)
+                    return sheduler(message)
 
             elif message.text == "🛑 Остановить рассылку":
                 return notrepeat(message)
             
             elif message.text == "🕒 Время рассылки":
                 return repeat_time(message)
-
 
             elif message.text == "↩️ Назад":
                 markup.add(*startkeyboard)
@@ -298,7 +304,9 @@ def get_text_messages(message):
                                                            f' Что-то пошло не так')
 
             else:
+
                 try:
+                    
                     city = message.text
                     bot.send_message(message.from_user.id,
                                      f'Привет {message.from_user.first_name}!'
@@ -315,6 +323,5 @@ def get_text_messages(message):
             break
         except req.exceptions.ConnectionError:
             time.sleep(1)
-
 
 bot.polling(none_stop=True)
